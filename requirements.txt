@@ -1,0 +1,11 @@
+# Common Python dependencies for inference and serving
+vllm
+transformers
+accelerate
+sentencepiece
+torch
+uvicorn
+fastapi
+aiohttp
+numpy
+protobuf
