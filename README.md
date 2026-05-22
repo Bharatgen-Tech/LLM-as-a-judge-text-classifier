@@ -1,4 +1,4 @@
-# Project README
+# Epic Data Classifier
 
 This repository contains inference and utility scripts used for model evaluation and deployment. Key files added recently include:
 
@@ -121,6 +121,83 @@ curl -X POST http://localhost:8000/generate -d '{"prompt":"Hello"}'
 ```
 
 Adjust the endpoint path to match what `async_3.py` exposes.
+
+## Detailed CLI reference
+
+Below are the exact required inputs and common options for the main scripts so you can run them reliably.
+
+- `async_3.py` (core async inference runner)
+
+  Required arguments:
+  - `--input-path` : path to a JSON/JSONL/Parquet file containing input records.
+  - `--output-file`: path to the output JSONL file to append generated results to.
+  - `--instruction-path`: path to a YAML file containing instruction templates.
+  - `--task`      : Instruction in the YAML path.
+
+  Common optional arguments:
+  - `--template-fields` : list of JSON keys in your input data used to fill template placeholders in task prompt.
+  - `--backend`         : backend type (choices include `vllm`, `vllm-chat`, `sglang`, `trt`, ...). Default: `vllm-chat`.
+  - `--model`           : model id (if omitted the script will query the backend for a default model).
+  - `--base-url`        : full base URL to the model server (overrides `--host`/`--port`).
+  - `--host` / `--port` : host and port of the model server (defaults chosen by backend if omitted).
+  - `--extra-request-body` : JSON string of extra body fields to include in each request.
+  - `--max-concurrency`, `--request-rate`, `--enable-stream`, `--disable-tqdm`, `--parse-quality`.
+
+  Input expectations and outputs:
+  - Input records must contain the fields referenced by the instruction template (commonly `id` and any fields used by `--template-fields`).
+  - Supported input formats: `.json`, `.jsonl`, `.parquet`.
+  - Output: newline-delimited JSON written to `--output-file` (appends). A companion errors file is created as `*.errors.jsonl` for parse/request errors.
+
+  Example:
+
+  ```bash
+  python async_3.py \
+    --input-path data/tasks.jsonl \
+    --output-file out/results.jsonl \
+    --instruction-path instructions.yaml \
+    --task my_task.path \
+    --template-fields text_field id \
+    --backend vllm-chat \
+    --base-url http://localhost:8000 \
+    --max-concurrency 16
+  ```
+
+- `chk_dup.py` (detect duplicate IDs)
+
+  Usage:
+  ```bash
+  python chk_dup.py /path/to/file.jsonl --field id --show-dupes 20
+  ```
+
+- `ider.py` (add UUIDs to records missing `id`)
+
+  Usage (stdin/stdout or files):
+  ```bash
+  python ider.py input.jsonl output.jsonl
+  # or
+  cat input.jsonl | python ider.py > output.jsonl
+  ```
+
+- `ider_dup.py` (append UUID suffix to duplicate IDs and add ID if no ID exists)
+
+  Usage:
+  ```bash
+  python ider_dup.py input.jsonl output.jsonl
+  ```
+
+- `parser.py` (re-parse `generated_text` into structured judge fields)
+
+  Usage:
+  ```bash
+  python parser.py --input scored.jsonl --output reparsed.jsonl [--text-key generated_text]
+  ```
+
+- `segg_data.py` (join eval results with data and segregate per `label`)
+
+  Usage:
+  ```bash
+  python segg_data.py --input eval.jsonl --data source.jsonl --output-dir ./out --label-field label
+  ```
 
 ## Example environment variables
 
