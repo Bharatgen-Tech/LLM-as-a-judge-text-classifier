@@ -30,6 +30,12 @@ Optional but recommended:
 
 ## HAProxy with Docker
 
+Edit the HAProxy configuration files  with the node IPs and ports:
+```bash 
+  server <name> <IP>:<port> check
+```
+
+
 Run HAProxy using the official image while mounting the provided configuration file. From the repository root run:
 
 ```bash
@@ -87,18 +93,112 @@ Notes:
 
 Make the scripts executable (if needed) and run `deploy.sh` to start the inference service.
 
+Concurrently deploys a [vLLM](https://github.com/vllm-project/vllm) server across multiple remote hosts over SSH. Each host gets its own `tmux` session and an auto-incremented port, with all output captured to a timestamped remote log file.
+
+---
+
+## Requirements
+
+- `tmux` installed on every remote host
+- `uv` available in the remote environment
+- SSH key-based (passwordless) access to all hosts
+- A venv containing vLLM at a known path on the remote hosts
+
+---
+
+## Usage
+Edit the deploy.sh file to add the IPs of the hosts on the hardcoded list
 ```bash
-chmod +x deploy.sh stop.sh
-./deploy.sh
+./deploy.sh [OPTIONS]
 ```
 
-What `deploy.sh` typically does (common patterns):
-- Ensures the virtual environment is activated (or uses system Python).
-- Exports environment variables such as `MODEL_PATH`, `PORT`, `WORKER_COUNT`.
-- Launches `async_3.py` in the background (e.g. with `nohup` or as a detached process) and writes a PID file such as `service.pid`.
+### Required flags
 
-Check the `deploy.sh` contents in this repo to confirm exact behavior before running. If the script starts the server in the background it will usually create a PID file; `stop.sh` will read that PID file and kill the process.
+| Flag | Description |
+|---|---|
+| `-m, --model MODEL` | Model name or path to serve (e.g. `openai/gpt-oss-120b`) |
+| `-e, --venv PATH` | Absolute path to the venv `activate` script on the remote hosts |
 
+### Optional flags
+
+| Flag | Default | Description |
+|---|---|---|
+| `-t, --tp N` | `4` | Tensor parallel size |
+| `-d, --dp N` | `2` | Data parallel size |
+| `-p, --port N` | `30600` | Base port — each host gets `base + index` |
+| `-g, --gpus LIST` | `0,1,2,3,4,5,6,7` | `CUDA_VISIBLE_DEVICES` value |
+| `-H, --hosts H1,H2,...` | hardcoded list | Comma-separated list of remote hostnames |
+| `-u, --gpu-mem F` | `0.90` | GPU memory utilisation fraction |
+| `--extra "FLAGS"` | prefix-caching + trust-remote-code + async-scheduling | Extra vLLM flags passed through verbatim |
+| `-h, --help` | | Print usage and exit |
+
+---
+
+## Examples
+
+**Standard two-host deployment with 8 GPUs each:**
+```bash
+./deploy_vllm.sh \
+  --model openai/gpt-oss-120b \
+  --tp 4 --dp 2 \
+  --port 30600 \
+  --venv /fsxnew/user/vllmenv/bin/activate
+```
+Host `ip-10-0-249-61` serves on port `30600`, host `ip-10-0-252-170` on `30601`.
+
+**Custom host list, 4 GPUs, with extra vLLM flags:**
+```bash
+./deploy_vllm.sh \
+  --model meta-llama/Llama-3-70b \
+  --tp 4 --dp 1 \
+  --port 8000 \
+  --gpus 0,1,2,3 \
+  --hosts ip-10-0-1-10,ip-10-0-1-11,ip-10-0-1-12 \
+  --venv /home/ubuntu/venv/bin/activate \
+  --extra "--max-num-seqs 64 --max-model-len 32768"
+```
+
+---
+
+## Behaviour
+
+- Hosts are deployed **concurrently** (each in a background subshell).
+- An existing `tmux` session with the same name is killed before re-deploying.
+- SSH connectivity is verified before any deployment step.
+- Errors are printed to stdout **and** appended to `deployment_errors.log` in the script directory.
+- Remote stdout/stderr is captured to `~/vllm_<model>_<timestamp>.log` on each host.
+
+### Checking on a running deployment
+
+```bash
+# Attach to the tmux session on a host
+ssh ip-10-0-249-61 "tmux attach -t vllm_ip-10-0-249-61"
+
+# Tail the remote log (without attaching)
+ssh ip-10-0-249-61 "tail -f ~/vllm_*.log"
+```
+
+---
+
+## Port allocation
+
+Ports are assigned by host order, starting from `--port`:
+
+| Host index | Port |
+|---|---|
+| 0 (first host) | `BASE_PORT` |
+| 1 | `BASE_PORT + 1` |
+| N | `BASE_PORT + N` |
+
+---
+
+## Error log
+
+All deployment failures are appended to `deployment_errors.log` in the same directory as the script, with the format:
+
+```
+[YYYY-MM-DD HH:MM:SS] DEPLOYMENT ERROR | host=<host> | <reason>
+```
 To stop the service:
 
 ```bash
